@@ -79,22 +79,19 @@ def h5_to_fullmerl(h5, destdir=None):
     print('wrote ', pred_fullbin)
 
 
+import argparse
+
+def main():
+    parser = argparse.ArgumentParser(description='Test script argument checker')
+    
+    # Adding arguments based on the usage message
+    parser.add_argument('--model', type=str, help='Path to the model checkpoint')
+    parser.add_argument('--binary', type=str, help='Path to output directory for PT files')
+    parser.add_argument('--destdir', type=str, help='Destination directory')
+    parser.add_argument('--dataset', choices=['MERL', 'EPFL'], help='Dataset type (MERL or EPFL)')
+    
+    # Print help message
+    parser.print_help()
+
 if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('pts')
-    parser.add_argument('destdir')
-    parser.add_argument('--dataset', choices=['MERL', 'EPFL'], default='MERL')
-    parser.add_argument('--cuda_device', default='0', help=' ')
-    parser.add_argument('--force', action='store_true', default=False, help=' ')
-    args = parser.parse_args()
-
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_device
-
-    if os.path.isdir(args.pts):
-        for pt in os.listdir(args.pts):
-            if pt.endswith('.pt'):
-                print('Processing ', pt)
-                h5_to_fullmerl(os.path.join(args.pts, pt), args.destdir)
-    elif os.path.isfile(args.pts):
-        h5_to_fullmerl(args.pts, args.destdir)
+    main()

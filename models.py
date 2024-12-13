@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from collections import OrderedDict
 from torchmeta.modules import (MetaModule, MetaSequential)
-from torchmeta.modules.utils import get_subdict
+# from torchmeta.modules.utils import self.get_subdict
 
 
 # Code adapted from Sitzmann et al 2020
@@ -113,7 +113,8 @@ class FCBlock(MetaModule):
         if params is None:
             params = OrderedDict(self.named_parameters())
 
-        output = self.net(coords, params=get_subdict(params, 'net'))
+        # output = self.net(coords, params=self.self.get_subdict(params, 'net'))
+        output = self.net(coords, params=self.get_subdict(params, 'net'))
         return output
 
     def forward_with_activations(self, coords, params=None, retain_grad=False):
@@ -126,10 +127,10 @@ class FCBlock(MetaModule):
         x = coords.clone().detach().requires_grad_(True)
         activations['input'] = x
         for i, layer in enumerate(self.net):
-            subdict = get_subdict(params, 'net.%d' % i)
+            subdict = self.self.get_subdict(params, 'net.%d' % i)
             for j, sublayer in enumerate(layer):
                 if isinstance(sublayer, BatchLinear):
-                    x = sublayer(x, params=get_subdict(subdict, '%d' % j))
+                    x = sublayer(x, params=self.self.get_subdict(subdict, '%d' % j))
                 else:
                     x = sublayer(x)
 
@@ -229,7 +230,7 @@ class SingleBVPNet(MetaModule):
         coords_org = model_input['coords'].clone().detach().requires_grad_(True)
         coords = coords_org
 
-        output = self.net(coords, get_subdict(params, 'net'))
+        output = self.net(coords, self.get_subdict(params, 'net'))
         return {'model_in': coords_org, 'model_out': output}
 
     def forward_with_activations(self, model_input):
@@ -294,3 +295,107 @@ class HyperBRDF(nn.Module):
 
         return {'model_in': model_output['model_in'], 'model_out': model_output['model_out'], 'latent_vec': embedding,
                 'hypo_params': hypo_params}
+        
+        
+
+    
+if __name__ == '__main__':
+    import argparse
+    import sys
+    from torch.utils.data import DataLoader
+    from data_processing import MerlDataset
+    import time
+    
+    # Create test arguments
+    test_args = [
+        '--destdir', 'results/merl',
+        '--binary', 'data',
+        '--dataset', 'MERL',
+        '--kl_weight', '0.1',
+        '--fw_weight', '0.1',
+        '--epochs', '100',
+        '--lr', '5e-5',
+        '--keepon', 'False'
+    ]
+    
+    # Parse arguments using the test values
+    parser = argparse.ArgumentParser('HyperBRDF Training')
+    parser.add_argument('--destdir', type=str, required=True,
+                        help='Output directory for results')
+    parser.add_argument('--binary', type=str, required=True,
+                        help='Dataset path')
+    parser.add_argument('--dataset', choices=['MERL', 'EPFL'], default='MERL',
+                        help='Dataset type (MERL or EPFL)')
+    parser.add_argument('--kl_weight', type=float, default=0.1,
+                        help='Weight for KL divergence loss')
+    parser.add_argument('--fw_weight', type=float, default=0.1,
+                        help='Weight for forward loss')
+    parser.add_argument('--epochs', type=int, default=100,
+                        help='Number of training epochs')
+    parser.add_argument('--lr', type=float, default=5e-5,
+                        help='Learning rate')
+    parser.add_argument('--keepon', type=bool, default=False,
+                        help='Continue training from loaded checkpoint')
+    
+    args = parser.parse_args(test_args)
+    
+    # Setup device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
+    # Create model
+    print("Creating HyperBRDF model...")
+    model = HyperBRDF(in_features=6, out_features=3).to(device)
+    print("Model created successfully")
+    
+    # Setup dataset
+    print("Loading dataset...")
+    dataset = MerlDataset(args.binary)
+    dataloader = DataLoader(dataset, shuffle=True, batch_size=1)
+    print(f"Dataset loaded with {len(dataset)} samples")
+    
+    # Setup optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    
+    # Training loop
+    print("\nStarting training...")
+    model.train()
+    for epoch in range(args.epochs):
+        epoch_loss = 0.0
+        batch_count = 0
+        
+        for batch_idx, (model_input, gt) in enumerate(dataloader):
+            # Move data to device
+            model_input = {key: value.to(device) for key, value in model_input.items()}
+            gt = {key: value.to(device) for key, value in gt.items()}
+            
+            # Forward pass
+            optimizer.zero_grad()
+            output = model(model_input)
+            
+            # Calculate loss
+            img_loss = ((output['model_out'] - gt['amps']) ** 2).mean()
+            latent_loss = args.kl_weight * torch.mean(output['latent_vec'] ** 2)
+            
+            # Total loss
+            loss = img_loss + latent_loss
+            
+            # Backward pass
+            loss.backward()
+            optimizer.step()
+            
+            epoch_loss += loss.item()
+            batch_count += 1
+            
+            if batch_idx % 10 == 0:
+                print(f"Epoch [{epoch}/{args.epochs}], Batch [{batch_idx}/{len(dataloader)}], "
+                      f"Loss: {loss.item():.6f}")
+        
+        avg_epoch_loss = epoch_loss / batch_count
+        print(f"Epoch [{epoch}/{args.epochs}], Average Loss: {avg_epoch_loss:.6f}")
+        
+        # Save checkpoint every 10 epochs
+        if epoch % 10 == 0:
+            torch.save(model.state_dict(), f'checkpoint_epoch_{epoch}.pt')
+    
+    print("Training completed!")

@@ -9,7 +9,7 @@ from utils.common import get_mgrid
 
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 
-device = 'cpu'  # 'cuda' or 'cpu'
+device = 'cuda'  # 'cuda' or 'cpu'
 Xvars = ['hx', 'hy', 'hz', 'dx', 'dy', 'dz']
 Yvars = ['brdf_r', 'brdf_g', 'brdf_b']
 

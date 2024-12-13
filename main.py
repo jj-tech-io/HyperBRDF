@@ -121,73 +121,83 @@ def eval_model(model, dataloader, path_=None, name=''):
     y_pred = y_pred[:, :, 0]
     mse = mean_squared_error(y_true, y_pred)
     return mse
+if __name__ == '__main__':
+    # Create test arguments
+    test_args = [
+        '--destdir', 'results/merl',
+        '--binary', 'data',
+        '--dataset', 'MERL',
+        '--kl_weight', '0.1',
+        '--fw_weight', '0.1',
+        '--epochs', '100',
+        '--lr', '5e-5',
+        '--keepon', 'False'
+    ]
+    
+    # Parse arguments using the test values
+    parser = argparse.ArgumentParser('')
+    parser.add_argument('--destdir', dest='destdir', type=str, required=True, help='output directory')
+    parser.add_argument('--binary', type=str, required=True, help='dataset path')
+    parser.add_argument('--dataset', choices=['MERL', 'EPFL'], default='MERL')
+    parser.add_argument('--kl_weight', type=float, default=0., help='latent loss weight')
+    parser.add_argument('--fw_weight', type=float, default=0., help='hypo loss weight')
+    parser.add_argument('--epochs', type=int, default=80, help='number of epochs')
+    parser.add_argument('--lr', type=float, default=5e-5, help='learning rate')
+    parser.add_argument('--keepon', type=bool, default=False, help='continue training from loaded checkpoint')
+    
+    args = parser.parse_args(test_args)
+    device = get_device()
+    print(device)
 
+    path_ = op.join(args.destdir, args.dataset)
+    create_directory(path_)
+    create_directory(op.join(path_, 'img'))
 
-######################################################################################
+    with open(op.join(path_, 'args.txt'), 'w') as f:
+        json.dump(args.__dict__, f, indent=2)
 
-parser = argparse.ArgumentParser('')
-parser.add_argument('--destdir', dest='destdir', type=str, required=True, help='output directory')
-parser.add_argument('--binary', type=str, required=True, help='dataset path')
-parser.add_argument('--dataset', choices=['MERL', 'EPFL'], default='MERL')
-parser.add_argument('--kl_weight', type=float, default=0., help='latent loss weight')
-parser.add_argument('--fw_weight', type=float, default=0., help='hypo loss weight')
-parser.add_argument('--epochs', type=int, default=80, help='number of epochs')
-parser.add_argument('--lr', type=float, default=5e-5, help='learning rate')
-parser.add_argument('--keepon', type=bool, default=False, help='continue training from loaded checkpoint')
+    # Set hyperparameters
+    kl_weight = args.kl_weight
+    fw_weight = args.fw_weight
+    loss_fn = partial(image_hypernetwork_loss, kl_weight, fw_weight)
+    clip_grad = True
+    lr = args.lr
+    epochs = args.epochs
+    binary = args.binary
 
-args = parser.parse_args()
-device = get_device()
-print(device)
+    if args.dataset == 'MERL':
+        dataset = MerlDataset(binary)
+        dataloader = DataLoader(dataset, shuffle=True, batch_size=1)
+    elif args.dataset == 'EPFL':
+        dataset = EPFL(binary)
+        dataloader = DataLoader(dataset, shuffle=True, batch_size=1)
 
-path_ = op.join(args.destdir, args.dataset)
-create_directory(path_)
-create_directory(op.join(path_, 'img'))
+    # Train model
+    start_time = time.time()
+    # Before the training code, add:
+    path_ = op.join('results', 'merl', 'MERL')  # Use os.path.join for platform compatibility
+    os.makedirs(path_, exist_ok=True)  # Create all directories recursively
+    os.makedirs(op.join(path_, 'img'), exist_ok=True)
 
-with open(op.join(path_, 'args.txt'), 'w') as f:
-    json.dump(args.__dict__, f, indent=2)
-
-#### Set hyperparameters
-kl_weight = args.kl_weight
-fw_weight = args.fw_weight
-
-loss_fn = partial(image_hypernetwork_loss, kl_weight, fw_weight)
-
-clip_grad = True
-lr = args.lr
-epochs = args.epochs
-binary = args.binary
-
-if args.dataset == 'MERL':
-    dataset = MerlDataset(binary)
-    dataloader = DataLoader(dataset, shuffle=True, batch_size=1)
-
-elif args.dataset == 'EPFL':
-    dataset = EPFL(binary)
-    dataloader = DataLoader(dataset, shuffle=True, batch_size=1)
-
-
-#### Train model
-start_time = time.time()
-# Start training model
-if args.keepon:
-    model = torch.load(op.join(path_, 'checkpoint.pt'))
-else:
-    model = HyperBRDF(in_features=6, out_features=3).to(device)
-train_losses, all_losses = [], []
-optim = torch.optim.Adam(lr=lr, params=model.parameters())
-epoch_loss, individual_losses = eval_epoch(model, dataloader, loss_fn, optim, 0)
-train_losses.append(epoch_loss)
-all_losses.append(individual_losses)
-print('init', epoch_loss, all_losses)
-
-for epoch in range(epochs):
-    epoch_loss, individual_losses = train_epoch(model, dataloader, loss_fn, optim, epoch)
+    # Then modify the model creation part:
+    if args.keepon and op.exists(op.join(path_, 'checkpoint.pt')):
+        model = torch.load(op.join(path_, 'checkpoint.pt'))
+    else:
+        model = HyperBRDF(in_features=6, out_features=3).to(device)
+    train_losses, all_losses = [], []
+    optim = torch.optim.Adam(lr=lr, params=model.parameters())
+    epoch_loss, individual_losses = eval_epoch(model, dataloader, loss_fn, optim, 0)
     train_losses.append(epoch_loss)
     all_losses.append(individual_losses)
-    print(epoch, epoch_loss, all_losses)
+    print('init', epoch_loss, all_losses)
 
-# Save training losses, and trained model
-pd.DataFrame(train_losses).to_csv(op.join(path_, 'train_loss.csv'))
-pd.DataFrame(all_losses).to_csv(op.join(path_, 'all_losses.csv'))
-torch.save(model, op.join(path_, 'checkpoint.pt'))
-#### Finish training
+    for epoch in range(epochs):
+        epoch_loss, individual_losses = train_epoch(model, dataloader, loss_fn, optim, epoch)
+        train_losses.append(epoch_loss)
+        all_losses.append(individual_losses)
+        print(epoch, epoch_loss, all_losses)
+
+    # Save training losses, and trained model
+    pd.DataFrame(train_losses).to_csv(op.join(path_, 'train_loss.csv'))
+    pd.DataFrame(all_losses).to_csv(op.join(path_, 'all_losses.csv'))
+    torch.save(model, op.join(path_, 'checkpoint.pt'))

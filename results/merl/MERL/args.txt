@@ -1,0 +1,10 @@
+{
+  "destdir": "results/merl",
+  "binary": "data",
+  "dataset": "MERL",
+  "kl_weight": 0.1,
+  "fw_weight": 0.1,
+  "epochs": 100,
+  "lr": 5e-05,
+  "keepon": true
+}
